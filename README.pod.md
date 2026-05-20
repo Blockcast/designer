@@ -244,3 +244,10 @@ If `/json/list` shows a login screen, the bootstrap profile is stale — re-boot
   lets admins inspect + revoke if a profile leaks.
 - **Profile rotation cadence**: re-bootstrap once a quarter, or after any
   cluster restore-from-backup.
+
+## Known limitations (v1)
+
+- **File uploads/downloads from designer break in pod mode.** Chrome runs
+  in the bot pod, not the agent pod; file_chooser paths resolve to bot-pod
+  filesystem. Iteration-only flow (URL ↔ prompts) works. Future v2: CDP
+  fileChooser tunneling or a designer-side artifact API.
