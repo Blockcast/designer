@@ -7,8 +7,22 @@
 set -e
 
 PORT="${DESIGNER_CDP:-9222}"
-PROFILE="$HOME/.chrome-designer-profile"
-CHROME="${CHROME_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+PROFILE="${DESIGNER_CHROME_PROFILE:-$HOME/.chrome-designer-profile}"
+
+# Resolve Chrome binary per-OS if CHROME_BIN not set.
+if [ -z "${CHROME_BIN:-}" ]; then
+  case "$(uname -s)" in
+    Darwin)
+      CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      ;;
+    Linux)
+      for c in /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+        if [ -x "$c" ]; then CHROME_BIN="$c"; break; fi
+      done
+      ;;
+  esac
+fi
+CHROME="${CHROME_BIN:-/usr/bin/google-chrome}"
 
 if [ ! -x "$CHROME" ]; then
   echo "[designer-chrome] Chrome not found at: $CHROME" >&2
