@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { defaultChromeBin, isChromeRunning, QUIT_CHROME_HINT } from './cross-platform.ts';
 
 const PORT = process.env.DESIGNER_CDP || '9222';
-const PROFILE = path.join(os.homedir(), '.chrome-designer-profile');
+const PROFILE = process.env.DESIGNER_CHROME_PROFILE || path.join(os.homedir(), '.chrome-designer-profile');
 const CHROME_BIN = process.env.CHROME_BIN || defaultChromeBin();
 
 async function isCdpUp(): Promise<boolean> {

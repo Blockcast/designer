@@ -11,7 +11,7 @@ const SKILL_DEST_DIR = path.join(os.homedir(), '.claude', 'skills', 'designer-lo
 const SKILL_DEST = path.join(SKILL_DEST_DIR, 'SKILL.md');
 const CHROME_BIN = process.env.CHROME_BIN || defaultChromeBin();
 const DEFAULT_PORT = process.env.DESIGNER_CDP || '9222';
-const PROFILE = path.join(os.homedir(), '.chrome-designer-profile');
+const PROFILE = process.env.DESIGNER_CHROME_PROFILE || path.join(os.homedir(), '.chrome-designer-profile');
 
 type Status = 'ok' | 'wait' | 'fail';
 
