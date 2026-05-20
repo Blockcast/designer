@@ -210,18 +210,30 @@ async function main(): Promise<void> {
     case 'health': {
       const browser = createBrowser({ session: `designer-${key}` });
       const results = await runHealth(browser);
-      const worst = results.some((r) => r.status === 'fail') ? 'fail' : 'ok';
-      const icon = (s: string) => (s === 'ok' ? '✓' : s === 'fail' ? '✗' : '·');
-      for (const r of results) {
-        const line = `${icon(r.status)} [${r.category}] ${r.id} — ${r.description}${r.detail ? ' (' + r.detail + ')' : ''}`;
-        console.log(line);
-      }
       const counts = results.reduce<Record<string, number>>((acc, r) => {
         acc[r.status] = (acc[r.status] || 0) + 1;
         return acc;
       }, {});
-      console.log(`\n${counts['ok'] || 0} ok, ${counts['fail'] || 0} fail, ${counts['skip'] || 0} skip`);
-      if (worst === 'fail') process.exit(2);
+      const fail = results.some((r) => r.status === 'fail');
+      const url = (await browser.url().catch(() => '')) || '';
+      if (flags.json === true || flags.json === '') {
+        const payload = {
+          ok: !fail,
+          generatedAt: new Date().toISOString(),
+          url,
+          counts: { ok: counts['ok'] || 0, fail: counts['fail'] || 0, skip: counts['skip'] || 0 },
+          results
+        };
+        console.log(JSON.stringify(payload, null, 2));
+      } else {
+        const icon = (s: string) => (s === 'ok' ? '✓' : s === 'fail' ? '✗' : '·');
+        for (const r of results) {
+          const line = `${icon(r.status)} [${r.category}] ${r.id} — ${r.description}${r.detail ? ' (' + r.detail + ')' : ''}`;
+          console.log(line);
+        }
+        console.log(`\n${counts['ok'] || 0} ok, ${counts['fail'] || 0} fail, ${counts['skip'] || 0} skip`);
+      }
+      if (fail) process.exit(2);
       break;
     }
     case 'doctor': {
@@ -463,10 +475,14 @@ selectors.json present, designer-loop skill installed at ~/.claude/skills/, MCP 
 
 Exits with code 2 if any check fails.`,
 
-  health: `designer health — probe every UI anchor this MCP depends on.
+  health: `designer health [--json] — probe every UI anchor this MCP depends on.
 
 Walks the current Chrome state (home / session) and checks each selector / button / URL /
 DOM pattern we rely on. Reports pass / fail / skip per anchor with actionable detail.
+
+Flags:
+  --json     Emit a structured { ok, generatedAt, url, counts, results } JSON payload
+             on stdout instead of icons. Exit code is unchanged.
 
 Exit code 2 on any fail — wire into cron or CI to catch UI regressions (e.g., claude.ai
 moving the Share button) before users do.`,
@@ -597,14 +613,36 @@ async function checkOnDesignSurface(): Promise<DoctorCheck> {
   const port = process.env.DESIGNER_CDP || '9222';
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-    if (!res.ok) return { name: 'logged into claude.ai/design', status: 'fail', detail: `HTTP ${res.status}` };
+    if (!res.ok) {
+      return {
+        name: 'claude.ai/design tab',
+        status: 'fail',
+        detail: `CDP HTTP ${res.status} — debug Chrome may have died. Run \`designer setup\` to relaunch it.`
+      };
+    }
     const tabs = await res.json() as Array<{ url?: string; title?: string }>;
     const onDesign = tabs.find((t) => t.url && /claude\.ai\/design/.test(t.url));
-    if (!onDesign) return { name: 'logged into claude.ai/design', status: 'warn', detail: 'no tab on claude.ai/design — sign in and navigate there in the debug Chrome window' };
-    if (/login|sign in/i.test(onDesign.title || '')) return { name: 'logged into claude.ai/design', status: 'fail', detail: 'on a login page; sign in inside the debug Chrome window' };
-    return { name: 'logged into claude.ai/design', status: 'ok', detail: onDesign.url };
+    if (!onDesign) {
+      return {
+        name: 'claude.ai/design tab',
+        status: 'warn',
+        detail: 'no tab on claude.ai/design in the debug Chrome window. Open https://claude.ai/design THERE (not in your normal Chrome — they are separate profiles with separate cookies).'
+      };
+    }
+    if (/login|sign in/i.test(onDesign.title || '')) {
+      return {
+        name: 'signed in to claude.ai/design',
+        status: 'fail',
+        detail: 'on a login page. Sign in INSIDE the debug Chrome window (not your normal Chrome — that profile is signed in but its cookies are not shared).'
+      };
+    }
+    return { name: 'signed in to claude.ai/design', status: 'ok', detail: onDesign.url };
   } catch {
-    return { name: 'logged into claude.ai/design', status: 'fail', detail: 'CDP not reachable; fix CDP first' };
+    return {
+      name: 'claude.ai/design tab',
+      status: 'fail',
+      detail: 'debug Chrome unreachable. Run `designer setup` to launch it.'
+    };
   }
 }
 

@@ -7,6 +7,7 @@ import type { Browser } from './browser.ts';
 export type AnchorCategory = 'home' | 'session' | 'share' | 'pattern';
 export type AnchorState = 'home' | 'session' | 'any';
 export type ProbeStatus = 'ok' | 'fail' | 'skip';
+export type ProbePhase = 'home' | 'session';
 
 export interface ProbeResult {
   id: string;
@@ -15,6 +16,11 @@ export interface ProbeResult {
   requires: AnchorState;
   status: ProbeStatus;
   detail?: string;
+  // Present only when runHealth was invoked with an explicit `opts.phase` —
+  // tags which navigation state the result was captured in. `any`-anchors
+  // probe in both phases, so the same id may appear twice with different
+  // phase tags.
+  phase?: ProbePhase;
 }
 
 interface AnchorDef {
@@ -111,7 +117,12 @@ export const UI_ANCHORS: AnchorDef[] = [
     category: 'session',
     description: 'html-viewer-iframe (design preview)',
     requires: 'session',
-    check: async (b) => ({ ok: await hasSelector(b, '[data-testid="html-viewer-iframe"]') })
+    check: async (b, url) => {
+      // The iframe only renders when a file is open. Without ?file= in the URL,
+      // its absence is expected, not a regression.
+      if (!/[?&]file=/.test(url)) return { ok: true, detail: '(no file open — iframe not expected)' };
+      return { ok: await hasSelector(b, '[data-testid="html-viewer-iframe"]') };
+    }
   },
   {
     id: 'session.chatMessages',
@@ -125,28 +136,31 @@ export const UI_ANCHORS: AnchorDef[] = [
     category: 'pattern',
     description: 'iframe src is claudeusercontent.com with signed ?t= token',
     requires: 'session',
-    check: async (b) => {
+    check: async (b, url) => {
+      if (!/[?&]file=/.test(url)) return { ok: true, detail: '(no file open — iframe not expected)' };
       const src = await b.evalValue<string>(
         `(() => { const el = document.querySelector('[data-testid="html-viewer-iframe"]'); return (el && el.src) || ''; })()`
       ).catch(() => '');
-      if (!src) return { ok: false, detail: 'no iframe src (is a file open?)' };
+      if (!src) return { ok: false, detail: 'file param present but iframe missing src' };
       const ok = /claudeusercontent\.com/.test(src) && /[?&]t=/.test(src);
       return { ok, detail: ok ? undefined : `src=${src.slice(0, 120)}...` };
     }
   },
   {
+    // Legacy id (kept to avoid resetting the persisted streak counter). The
+    // original check asserted a 'You\n' / 'Claude\n' text prefix on each
+    // chat turn, but Claude's May 2026 chat redesign removed the in-text
+    // speaker label — turns are now visually distinguished by wrapper
+    // styling, not by a text prefix. Replace with an assertion against
+    // Claude's intentional `data-index="N"` API on each turn row: matching
+    // [data-index="1"] confirms the conversation has >=2 turns AND that the
+    // indexing API still exists. Shape is now simple-hasSelector so future
+    // drift of this anchor is auto-heal-patchable.
     id: 'session.chatTurnPrefix',
     category: 'pattern',
-    description: "chat turns prefixed with 'You\\n' / 'Claude\\n'",
+    description: 'chat-messages renders >=2 turn rows (data-index API)',
     requires: 'session',
-    check: async (b) => {
-      const sample = await b.evalValue<string>(
-        `(() => { const c = document.querySelector('[data-testid="chat-messages"]'); const inner = c && c.children[0]; if (!inner) return ''; return Array.from(inner.children).slice(0, 3).map(d => (d.innerText||'').slice(0, 40)).join('|'); })()`
-      ).catch(() => '');
-      if (!sample) return { ok: false, detail: 'no chat turns' };
-      const ok = /(^|\|)(You|Claude)(\\n|\n|$)/.test(sample) || /You\n|Claude\n/.test(sample);
-      return { ok, detail: ok ? undefined : `first turns: ${sample.slice(0, 120)}` };
-    }
+    check: async (b) => ({ ok: await hasSelector(b, '[data-testid="chat-messages"] [data-index="1"]') })
   },
 
   // --- share dialog (formerly the Export dropdown; moved under Share ~2026-04-19) ---
@@ -226,7 +240,10 @@ export const UI_ANCHORS: AnchorDef[] = [
       }
       const match = url.match(/[?&]file=([^&]+)/);
       if (match && match[1]) {
-        const activeFile = decodeURIComponent(match[1]);
+        // Claude Design's URL bar form-encodes spaces as '+'. decodeURIComponent
+        // only handles %xx, so normalize '+' → ' ' first before comparing
+        // against the scraper's text-node output (which uses real spaces).
+        const activeFile = decodeURIComponent(match[1].replace(/\+/g, ' '));
         if (!files.includes(activeFile)) {
           return {
             ok: false,
@@ -241,9 +258,45 @@ export const UI_ANCHORS: AnchorDef[] = [
 
 export async function runHealth(
   browser: Browser,
-  opts: { sessionProbeUrl?: string } = {}
+  opts: { phase?: ProbePhase } = {}
 ): Promise<ProbeResult[]> {
   const currentUrl = (await browser.url().catch(() => '')) || '';
+
+  // When `opts.phase` is supplied the caller has already navigated to the
+  // matching surface — filter strictly by that phase, tag every result with
+  // it, and suppress skips (a `home`-only anchor probed during a `session`
+  // phase isn't a skip-with-detail, it's just not part of this phase's run).
+  // When omitted, fall back to URL-inferred state for back-compat with
+  // single-phase callers (cli.ts `designer health`).
+  if (opts.phase) {
+    const phase = opts.phase;
+    const results: ProbeResult[] = [];
+    for (const a of UI_ANCHORS) {
+      const applicable =
+        a.requires === 'any' ||
+        (phase === 'home' && a.requires === 'home') ||
+        (phase === 'session' && a.requires === 'session');
+      if (!applicable) continue;
+      const base = {
+        id: a.id,
+        category: a.category,
+        description: a.description,
+        requires: a.requires,
+        phase
+      };
+      try {
+        const r = await a.check(browser, currentUrl);
+        results.push({ ...base, status: r.ok ? 'ok' : 'fail', detail: r.detail });
+      } catch (e) {
+        results.push({ ...base, status: 'fail', detail: `threw: ${(e as Error).message}` });
+      }
+    }
+    return results;
+  }
+
+  // Legacy URL-inferred path. Single-phase callers see the same behavior as
+  // before — skips emitted for anchors that don't match the inferred state,
+  // no `phase` field on results.
   const inSession = /\/design\/p\/[a-f0-9-]+/i.test(currentUrl);
   const onHome = /\/design\/?$/.test(currentUrl) || currentUrl.endsWith('/design');
   const state: 'home' | 'session' | 'other' = inSession ? 'session' : onHome ? 'home' : 'other';
