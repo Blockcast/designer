@@ -12,6 +12,7 @@ import { runSetup } from './setup.ts';
 import { startMcpServer } from './mcp-server.ts';
 import { REPO_ROOT } from './repo-root.ts';
 import { runHealth } from './ui-anchors.ts';
+import { maybeRenewLease } from './lease-renew.js';
 
 const [, , cmd, ...rest] = process.argv;
 
@@ -55,11 +56,13 @@ async function main(): Promise<void> {
 
   switch (cmd) {
     case 'open': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       console.log(JSON.stringify(await c.ensureReady(), null, 2));
       break;
     }
     case 'session': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       const action = (flags.action as 'status' | 'ensure_ready' | 'resume' | 'create') || 'status';
       const name = flags.name as string | undefined;
@@ -68,6 +71,7 @@ async function main(): Promise<void> {
       break;
     }
     case 'prompt': {
+      await maybeRenewLease();
       const prompt = await readPromptArg(flags);
       if (!prompt) throw new Error('Usage: designer prompt "<text>" | - (stdin) | --prompt-file path [--key k] [--file "f.html"]');
       const c = new DesignerController({ key });
@@ -82,6 +86,7 @@ async function main(): Promise<void> {
       break;
     }
     case 'create': {
+      await maybeRenewLease();
       const name = (flags.name as string) || flags._[0];
       if (!name) throw new Error('Usage: designer create <name> [--fidelity wireframe|highfi] [--key k]');
       const fidelity = (flags.fidelity as 'wireframe' | 'highfi') || 'wireframe';
@@ -90,11 +95,13 @@ async function main(): Promise<void> {
       break;
     }
     case 'resume': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       console.log(JSON.stringify(await c.resumeSession(), null, 2));
       break;
     }
     case 'snapshot': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       await c.ensureReady();
       const filename = flags.file as string | undefined;
@@ -117,11 +124,13 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(listSessions(), null, 2));
       break;
     case 'projects': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       console.log(JSON.stringify(await c.listProjects(), null, 2));
       break;
     }
     case 'files': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       const detail = await c.listFilesDetailed();
       if (!detail.authoritative) {
@@ -133,6 +142,7 @@ async function main(): Promise<void> {
       break;
     }
     case 'open-file': {
+      await maybeRenewLease();
       const filename = flags._.join(' ');
       if (!filename) throw new Error('Usage: designer open-file "<name>.html" --key k');
       const c = new DesignerController({ key });
@@ -140,6 +150,7 @@ async function main(): Promise<void> {
       break;
     }
     case 'ask': {
+      await maybeRenewLease();
       const prompt = await readPromptArg(flags);
       if (!prompt) throw new Error('Usage: designer ask "<text>" | - (stdin) | --prompt-file path --key k');
       const c = new DesignerController({ key });
@@ -152,12 +163,14 @@ async function main(): Promise<void> {
       break;
     }
     case 'handoff': {
+      await maybeRenewLease();
       const c = new DesignerController({ key });
       const r = await c.handoff({ openFile: flags.file as string | undefined });
       console.log(JSON.stringify(r, null, 2));
       break;
     }
     case 'fetch': {
+      await maybeRenewLease();
       const filename = flags._.join(' ');
       if (!filename) throw new Error('Usage: designer fetch "<name>.html" --key k [--out path]');
       const c = new DesignerController({ key });
