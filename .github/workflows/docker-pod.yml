@@ -1,0 +1,135 @@
+name: Docker (designer-runtime:pod)
+
+# Build + push the pod-runtime image when Dockerfile.pod, the launcher
+# scripts, or the TypeScript that ships inside the image changes. PRs build
+# but don't push, so reviewers see green CI without minting deploy-eligible
+# tags from unmerged code.
+
+on:
+  push:
+    branches:
+      - main
+      - feat/pod-support
+    paths:
+      - "Dockerfile.pod"
+      - "scripts/designer-chrome-pod.sh"
+      - "scripts/entrypoint-pod.sh"
+      - "scripts/designer-chrome.sh"
+      - "package.json"
+      - "package-lock.json"
+      - "*.ts"
+      - ".github/workflows/docker-pod.yml"
+  pull_request:
+    paths:
+      - "Dockerfile.pod"
+      - "scripts/designer-chrome-pod.sh"
+      - "scripts/entrypoint-pod.sh"
+      - "scripts/designer-chrome.sh"
+      - "package.json"
+      - "package-lock.json"
+      - "*.ts"
+      - ".github/workflows/docker-pod.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build-and-push:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    concurrency:
+      group: docker-pod-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clean stale node_modules from runner workspace
+        # Same rationale as paperclip docker.yml — self-hosted runner reuses
+        # workspaces; pnpm symlinks can survive and confuse buildkit's
+        # context walker.
+        run: |
+          find . -name node_modules -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          find . -name node_modules -type l -exec rm -f {} + 2>/dev/null || true
+
+      - name: Login to Harbor
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: harbor.blockcast.net
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Login to ghcr.io for base-image pulls
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          # Ephemeral builder per run — matches paperclip's
+          # post-buildcache-corruption posture.
+          cleanup: true
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            harbor.blockcast.net/designer/designer-runtime
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.pod
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=harbor.blockcast.net/designer/designer-runtime:buildcache
+          cache-to: |
+            ${{
+              github.event_name == 'push'
+              && 'type=registry,ref=harbor.blockcast.net/designer/designer-runtime:buildcache,mode=max,image-manifest=true,oci-mediatypes=true'
+              || ''
+            }}
+
+      - name: Image summary
+        if: github.event_name == 'push'
+        env:
+          # All values are pinned to action outputs (controlled) or git
+          # state (read-only) — not user input — but routing through env
+          # vars eliminates the `run:`-with-${{ … }} interpolation pattern
+          # entirely, which is the GHA-workflow-injection defense in depth.
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          {
+            echo "## designer-runtime image"
+            echo
+            echo "**Digest:** \`${IMAGE_DIGEST}\`"
+            echo
+            echo "**Tags pushed:**"
+            echo '```'
+            echo "${IMAGE_TAGS}"
+            echo '```'
+            echo
+            echo "Layer paperclip-agent on top:"
+            echo '```Dockerfile'
+            echo "FROM harbor.blockcast.net/designer/designer-runtime:sha-${SHORT_SHA}"
+            echo "RUN ..."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

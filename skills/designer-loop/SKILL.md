@@ -5,6 +5,49 @@ description: "Human-participated design iteration loop driven by claude.ai/desig
 
 # Designer Loop
 
+## Pod mode prologue (only when `CCROTATE_DESIGNER_LEASE_HOST` is set)
+
+If you are running inside a paperclip agent pod (env
+`CCROTATE_DESIGNER_LEASE_HOST` is set), you must acquire a Chrome lease
+from the ccrotate-auth-bot BEFORE running any designer commands.
+Designer's Chrome lives in the bot pod, not the agent pod — the lease
+gives you a per-run CDP URL that designer's CLI reads via
+`DESIGNER_RUN_DIR`.
+
+1. Create a per-run working directory:
+   ```bash
+   export DESIGNER_RUN_DIR="$(mktemp -d /tmp/designer-XXXXXXXX)"
+   ```
+
+2. Acquire a lease via the MCP server:
+   ```
+   mcp__ccrotate-designer__designer_lease({ purpose: "designer" })
+   ```
+   Capture `cdp_url`, `lease_id`, and the bearer token (embedded in
+   `cdp_url` as `?token=...`).
+
+3. Write the URL + lease_id to the run dir (designer reads them):
+   ```bash
+   echo "$LEASE_CDP_URL" > "$DESIGNER_RUN_DIR/cdp-url"
+   echo "$LEASE_ID" > "$DESIGNER_RUN_DIR/lease-id"
+   ```
+
+4. Proceed with the normal designer-loop steps. Each designer command
+   will honor `DESIGNER_RUN_DIR` automatically and renew the lease
+   before running (via designer's `maybeRenewLease()` helper).
+
+5. On completion (success OR failure), release:
+   ```
+   mcp__ccrotate-designer__designer_release({ lease_id: "$LEASE_ID" })
+   ```
+   And clean up: `rm -rf "$DESIGNER_RUN_DIR"`.
+
+If `CCROTATE_DESIGNER_LEASE_HOST` is unset (desktop developer flow):
+skip this prologue entirely. Existing `designer setup` desktop path is
+unchanged.
+
+---
+
 The human is the designer. Claude Design has taste. The orchestrating agent is translation + plumbing — not a co-designer.
 
 Three layers, each with its own job:

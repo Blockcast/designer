@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { DesignerController } from './designer-controller.ts';
 import { sessionDir } from './artifact-store.ts';
+import { maybeRenewLease } from './lease-renew.js';
 
 const server = new McpServer({ name: 'designer', version: '0.3.0' });
 const controllers = new Map<string, DesignerController>();
@@ -36,8 +37,10 @@ server.registerTool(
       fidelity: z.enum(['wireframe', 'highfi']).optional().describe('Locked at creation. Default wireframe.')
     }
   },
-  async ({ key, action = 'status', name, fidelity }) =>
-    textResult(await getController(key).session({ action, name, fidelity }))
+  async ({ key, action = 'status', name, fidelity }) => {
+    await maybeRenewLease();
+    return textResult(await getController(key).session({ action, name, fidelity }));
+  }
 );
 
 server.registerTool(
@@ -59,8 +62,10 @@ server.registerTool(
         )
     }
   },
-  async ({ key, prompt, file, timeoutMs, stabilityMs, decisive }) =>
-    textResult(await getController(key).iterate(prompt, { file, timeoutMs, stabilityMs, decisive }))
+  async ({ key, prompt, file, timeoutMs, stabilityMs, decisive }) => {
+    await maybeRenewLease();
+    return textResult(await getController(key).iterate(prompt, { file, timeoutMs, stabilityMs, decisive }));
+  }
 );
 
 server.registerTool(
@@ -76,8 +81,10 @@ server.registerTool(
       stabilityMs: z.number().optional().describe('Default 2.5s.')
     }
   },
-  async ({ key, prompt, file, timeoutMs, stabilityMs }) =>
-    textResult(await getController(key).ask(prompt, { file, timeoutMs, stabilityMs }))
+  async ({ key, prompt, file, timeoutMs, stabilityMs }) => {
+    await maybeRenewLease();
+    return textResult(await getController(key).ask(prompt, { file, timeoutMs, stabilityMs }));
+  }
 );
 
 server.registerTool(
@@ -91,6 +98,7 @@ server.registerTool(
     }
   },
   async ({ key, scope }) => {
+    await maybeRenewLease();
     const c = getController(key);
     if (scope === 'projects') return textResult(await c.listProjects());
     const detail = await c.listFilesDetailed();
@@ -122,6 +130,7 @@ server.registerTool(
     }
   },
   async ({ key, filename, includeHtml = false, screenshot = true }) => {
+    await maybeRenewLease();
     const c = getController(key);
     if (filename) {
       const swap = await c.openFile(filename);
@@ -157,7 +166,10 @@ server.registerTool(
       openFile: z.string().optional().describe('Set the open file before handoff.')
     }
   },
-  async ({ key, openFile }) => textResult(await getController(key).handoff({ openFile }))
+  async ({ key, openFile }) => {
+    await maybeRenewLease();
+    return textResult(await getController(key).handoff({ openFile }));
+  }
 );
 
 function extractFileParamFromUrl(url: string): string | null {
