@@ -10,8 +10,23 @@ const SKILL_SRC = path.join(REPO_ROOT, 'skills', 'designer-loop', 'SKILL.md');
 const SKILL_DEST_DIR = path.join(os.homedir(), '.claude', 'skills', 'designer-loop');
 const SKILL_DEST = path.join(SKILL_DEST_DIR, 'SKILL.md');
 const CHROME_BIN = process.env.CHROME_BIN || defaultChromeBin();
-const DEFAULT_PORT = process.env.DESIGNER_CDP || '9222';
 const PROFILE = process.env.DESIGNER_CHROME_PROFILE || path.join(os.homedir(), '.chrome-designer-profile');
+
+const _RUN_DIR = process.env.DESIGNER_RUN_DIR;
+function resolveCdpUrl(): string {
+  if (process.env.DESIGNER_CDP_URL) return process.env.DESIGNER_CDP_URL;
+  if (_RUN_DIR) {
+    try {
+      const fromFile = fs.readFileSync(path.join(_RUN_DIR, 'cdp-url'), 'utf8').trim();
+      if (fromFile) return fromFile;
+    } catch {}
+  }
+  // Legacy desktop default
+  return `http://127.0.0.1:${process.env.DESIGNER_CDP || '9222'}`;
+}
+const DEFAULT_CDP_URL = resolveCdpUrl();
+// Extract port for Chrome --remote-debugging-port and error messages
+const DEFAULT_PORT = (() => { try { return new URL(DEFAULT_CDP_URL).port || '9222'; } catch { return process.env.DESIGNER_CDP || '9222'; } })();
 
 type Status = 'ok' | 'wait' | 'fail';
 
@@ -24,18 +39,18 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function isCdpUp(port: string): Promise<boolean> {
+async function isCdpUp(cdpUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(1500) });
     return res.ok;
   } catch {
     return false;
   }
 }
 
-async function getDesignTab(port: string): Promise<{ url: string; title: string } | null> {
+async function getDesignTab(cdpUrl: string): Promise<{ url: string; title: string } | null> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${cdpUrl}/json/list`, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return null;
     const tabs = (await res.json()) as Array<{ url?: string; title?: string }>;
     for (const t of tabs) {
@@ -136,8 +151,8 @@ function step2AgentBrowser(): boolean {
   return true;
 }
 
-async function step3Chrome(port: string): Promise<boolean> {
-  if (await isCdpUp(port)) {
+async function step3Chrome(cdpUrl: string, port: string): Promise<boolean> {
+  if (await isCdpUp(cdpUrl)) {
     log('chrome', 'ok', `CDP already up on :${port}`);
     return true;
   }
@@ -163,7 +178,7 @@ async function step3Chrome(port: string): Promise<boolean> {
     stdio: 'ignore'
   });
   child.unref();
-  const up = await pollUntil('chrome', () => isCdpUp(port), {
+  const up = await pollUntil('chrome', () => isCdpUp(cdpUrl), {
     intervalMs: 800,
     timeoutMs: 30_000,
     reminder: `Waiting for CDP at :${port}...`
@@ -177,14 +192,14 @@ async function step3Chrome(port: string): Promise<boolean> {
   return true;
 }
 
-async function step4SignIn(port: string): Promise<boolean> {
-  const tab = await getDesignTab(port);
+async function step4SignIn(cdpUrl: string): Promise<boolean> {
+  const tab = await getDesignTab(cdpUrl);
   if (tab) {
     log('login', 'ok', `Signed in. Tab on ${tab.url.replace(/\?.*$/, '')}`);
     return true;
   }
   log('login', 'wait', 'Sign in to Claude in the debug Chrome window I just opened, then navigate to claude.ai/design. I am polling.');
-  const ok = await pollUntil('login', async () => (await getDesignTab(port)) !== null, {
+  const ok = await pollUntil('login', async () => (await getDesignTab(cdpUrl)) !== null, {
     intervalMs: 2000,
     timeoutMs: 10 * 60_000,
     reminder: 'Still waiting for a tab on claude.ai/design (not on /login).',
@@ -256,8 +271,8 @@ export async function runSetup(): Promise<number> {
 
   if (!(await step1NpmInstall())) return 1;
   if (!step2AgentBrowser()) return 1;
-  if (!(await step3Chrome(DEFAULT_PORT))) return 1;
-  if (!(await step4SignIn(DEFAULT_PORT))) return 1;
+  if (!(await step3Chrome(DEFAULT_CDP_URL, DEFAULT_PORT))) return 1;
+  if (!(await step4SignIn(DEFAULT_CDP_URL))) return 1;
   if (!step5Skill()) return 1;
   if (!step6Mcp(DEFAULT_PORT)) return 1;
 

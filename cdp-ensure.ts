@@ -4,13 +4,29 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { defaultChromeBin, isChromeRunning, QUIT_CHROME_HINT } from './cross-platform.ts';
 
-const PORT = process.env.DESIGNER_CDP || '9222';
+const RUN_DIR = process.env.DESIGNER_RUN_DIR;
 const PROFILE = process.env.DESIGNER_CHROME_PROFILE || path.join(os.homedir(), '.chrome-designer-profile');
 const CHROME_BIN = process.env.CHROME_BIN || defaultChromeBin();
 
+function resolveCdpUrl(): string {
+  if (process.env.DESIGNER_CDP_URL) return process.env.DESIGNER_CDP_URL;
+  if (RUN_DIR) {
+    try {
+      const fromFile = fs.readFileSync(path.join(RUN_DIR, 'cdp-url'), 'utf8').trim();
+      if (fromFile) return fromFile;
+    } catch {}
+  }
+  // Legacy desktop default
+  return `http://127.0.0.1:${process.env.DESIGNER_CDP || '9222'}`;
+}
+const CDP_URL = resolveCdpUrl();
+
+// Keep PORT for backward-compat references (e.g. error messages)
+const PORT = (() => { try { return new URL(CDP_URL).port || '9222'; } catch { return '9222'; } })();
+
 async function isCdpUp(): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${PORT}/json/version`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(1500) });
     return res.ok;
   } catch {
     return false;
