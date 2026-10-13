@@ -49,6 +49,7 @@ RUN npm i -g agent-browser@latest
 # so pod-only patches ship before they're upstreamed.
 WORKDIR /opt/designer-src
 COPY package.json package-lock.json ./
+COPY scripts/postinstall.mjs ./scripts/
 RUN npm ci --include=dev
 COPY . .
 RUN npm run build && npm pack && \
