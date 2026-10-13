@@ -102,6 +102,7 @@ jobs:
           cache-to: |
             ${{
               github.event_name == 'push'
+              && github.ref == 'refs/heads/main'
               && 'type=registry,ref=harbor.blockcast.net/designer/designer-runtime:buildcache,mode=max,image-manifest=true,oci-mediatypes=true'
               || ''
             }}
