@@ -16,7 +16,7 @@ concurrency:
 jobs:
   check:
     name: typecheck + build
-    runs-on: ubuntu-latest
+    runs-on: arc-light
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
