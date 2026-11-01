@@ -16,7 +16,12 @@ concurrency:
 jobs:
   check:
     name: typecheck + build
-    runs-on: arc-light
+    # Public repository: fork PRs run on GitHub-hosted runners and never reach
+    # the self-hosted pool (BLO-39949). Same-repo PRs and pushes use arc-light.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'arc-light' }}
+    # arc-light rolls with ARC's `eventual` strategy, so the longest job on the
+    # lane bounds an org-wide stall (BLO-39191); keep this one short.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
