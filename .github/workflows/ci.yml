@@ -16,8 +16,10 @@ concurrency:
 jobs:
   check:
     name: typecheck + build
-    # Fork PRs stay on GitHub-hosted runners; same-repository events use tools ARC.
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.full_name != github.repository && '{"labels":["ubuntu-latest"]}' || '{"group":"default-tools","labels":["arc-light"]}') }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      group: default-tools
+      labels: arc-light
     # The tools ARC pool rolls with ARC's `eventual` strategy, so the longest job on the
     # lane bounds an org-wide stall (BLO-39191); keep this one short.
     timeout-minutes: 15
@@ -35,7 +37,10 @@ jobs:
 
   smoke:
     name: clean-room install smoke
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      group: default-tools
+      labels: arc-dind
     needs: check
     steps:
       - uses: actions/checkout@v4
@@ -46,5 +51,5 @@ jobs:
       - run: npm ci --no-audit --no-fund
       # install-smoke.sh runs npm pack (which triggers the prepack hook =
       # check + build) then installs the tarball into a stock node:20
-      # container. ubuntu-latest already has docker available.
+      # container. The ARC DinD runner provides Docker.
       - run: bash scripts/install-smoke.sh
