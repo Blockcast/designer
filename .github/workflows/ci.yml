@@ -16,8 +16,9 @@ concurrency:
 jobs:
   check:
     name: typecheck + build
-    # Fork PRs stay on disposable GitHub-hosted runners; trusted events use ARC.
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.full_name != github.repository && '{"labels":["ubuntu-latest"]}' || '{"group":"default-tools","labels":["arc-light"]}') }}
+    runs-on:
+      group: default-tools
+      labels: arc-light
     # The tools ARC pool rolls with ARC's `eventual` strategy, so the longest job on the
     # lane bounds an org-wide stall (BLO-39191); keep this one short.
     timeout-minutes: 15
@@ -35,7 +36,9 @@ jobs:
 
   smoke:
     name: clean-room install smoke
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.full_name != github.repository && '{"labels":["ubuntu-latest"]}' || '{"group":"default-tools","labels":["arc-dind"]}') }}
+    runs-on:
+      group: default-tools
+      labels: arc-dind
     needs: check
     steps:
       - uses: actions/checkout@v4
