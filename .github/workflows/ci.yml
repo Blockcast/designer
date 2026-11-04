@@ -16,6 +16,7 @@ concurrency:
 jobs:
   check:
     name: typecheck + build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       group: default-tools
       labels: arc-light
@@ -36,6 +37,7 @@ jobs:
 
   smoke:
     name: clean-room install smoke
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       group: default-tools
       labels: arc-dind
