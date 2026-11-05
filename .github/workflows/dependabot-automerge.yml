@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   evaluate:
+    timeout-minutes: 60
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
