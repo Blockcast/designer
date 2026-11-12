@@ -20,9 +20,7 @@ permissions:
 jobs:
   release-please:
     timeout-minutes: 15
-    runs-on:
-      group: default-tools
-      labels: arc-light
+    runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
