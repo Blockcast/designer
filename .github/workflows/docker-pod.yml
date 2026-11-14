@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest  # BLO-56666: PR-triggered; public repo leaves org group 1
     timeout-minutes: 60
     concurrency:
       group: docker-pod-${{ github.ref }}
